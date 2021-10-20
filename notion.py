@@ -9,30 +9,45 @@ load_dotenv()
 NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
 NOTION_DATABASE_ID = os.environ.get('NOTION_DATABASE_ID')
 
+
 # notion urls 
 db_base_url = 'https://api.notion.com/v1/databases'
 page_base_url = 'https://api.notion.com/v1/pages'
 
-header = {
+notion_header = {
     'Authorization':NOTION_TOKEN, 
     'Notion-Version':'2021-08-16', # latest version as of 2021-10-18
     'Content-Type':'application/json'
 }
 
 
-def get_db_schema(db_id): 
+def get_db_schema(db_id, simple=False): 
     """
     Get the schema (column names and data types, aka properties) of a Notion database 
 
     Args:  
         db_id (str): Notion database ID
+        simple (bool): If True, return schema with only property name and type, and only for properities that require inputs (i.e. not formulas or rollups)
     
     Returns: 
         db_schema (dict): Notion database schema. Keys are column names
     """
     db_url = db_base_url + '/' + db_id 
-    response = requests.get(db_url, headers=header)
-    db_schema = json.loads(response.text)['properties']
+    response = requests.get(db_url, headers=notion_header)
+    db_schema_full = json.loads(response.text)['properties']
+    
+    if simple: 
+        db_schema = {}
+        for prop_name, prop_info in db_schema_full.items(): 
+            prop_type = prop_info['type']
+            if prop_type in ['formula', 'rollup', 'created_time', 'created_by', 'last_edited_time', 'last_edited_by']: 
+                # these property types are automatically populated
+                pass 
+            else: 
+                db_schema[prop_name] = prop_type
+    else: 
+        db_schema = db_schema_full 
+
     return db_schema
 
 
@@ -47,7 +62,7 @@ def get_db_pages(db_id):
         pages (list): List of pages in the Notion database 
     """
     db_query_url = db_base_url + '/' + db_id + '/query'
-    response = requests.post(db_query_url, headers=header)
+    response = requests.post(db_query_url, headers=notion_header)
     pages = json.loads(response.text)['results']
     return pages
 
@@ -61,10 +76,14 @@ def get_db_pg_ids(db_id):
 
     Returns: 
         pg_dict (dict): Keys are the page titles, values are the page IDs 
+    
+    Example: 
+       {'GOOG': '11045592-f563-467f-b04f-11cbc6230118',
+        'AAPL': '6488baa1-961e-46c0-adce-2382f5bfe7c0'}
     """
 
     # find name of db's title property 
-    db_schema = get_db_schema(db_id=db_id)
+    db_schema = get_db_schema(db_id=db_id, simple=True)
     prop_title = []
     for prop_name, prop_type in db_schema.items(): 
         if prop_type == 'title': 
