@@ -51,19 +51,52 @@ def get_db_schema(db_id, simple=False):
     return db_schema
 
 
-def get_db_pages(db_id): 
+def get_db_pages(db_id, filters=None): 
     """
-    Get a list of pages (and the properties and content of each page) in a Notion database 
+    Get a list of pages (and the properties of each page) in a Notion database 
 
     Args: 
         db_id (str): Notion database ID
+        filters (dict): Optional. Filters for pages in the database based on properties 
+
+        See: https://developers.notion.com/reference/post-database-query#post-database-query-filter 
+        Example filters argument with 3 "AND" conditions: 
+        
+        filters = {
+            'and': [
+                {
+                    'property': 'Stock', 
+                    'relation': {'contains':'522fccf3-f806-44a7-9560-1d094bebbe33'}
+                }, 
+                {
+                    'property': 'Type', 
+                    'select': {'equals':'BUY'}
+                }, 
+                {
+                    'property': 'Current shares', 
+                    'formula': {'number':{'greater_than':0}}
+                }
+            ]
+        }
 
     Returns: 
-        pages (list): List of pages in the Notion database 
+        pages (list): List of pages in the Notion database. May be empty if error or no pages match filter
     """
     db_query_url = db_base_url + '/' + db_id + '/query'
-    response = requests.post(db_query_url, headers=notion_header)
-    pages = json.loads(response.text)['results']
+
+    if filters != None: 
+        filters_data = {'filter': filters} 
+        filters_data = json.dumps(filters_data)
+    else: 
+        filters_data = None
+
+    response = requests.post(db_query_url, headers=notion_header, data=filters_data)
+    response = json.loads(response.text)
+    if response['object'] == 'error': 
+        print('there is an error: {}'.format(response['message']))
+        pages = []
+    else: 
+        pages = response['results']
     return pages
 
 
