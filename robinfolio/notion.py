@@ -23,11 +23,12 @@ notion_header = {
 
 def get_db_schema(db_id, simple=False): 
     """
-    Get the schema (column names and data types, aka properties) of a Notion database 
+    Get the schema (column names and data types, aka properties) of a Notion database
 
     Args:  
         db_id (str): Notion database ID
-        simple (bool): If True, return schema with only property name and type, and only for properities that require inputs (i.e. not formulas or rollups)
+        simple (bool): If True, return schema with only property name and type, and 
+            only for properities that require inputs (i.e. not formulas or rollups)
     
     Returns: 
         db_schema (dict): Notion database schema. Keys are column names
@@ -141,7 +142,8 @@ def create_db_pg_template(db_id, pg_icon=None):
 
     Args: 
         db_id (str): Notion database ID 
-        pg_icon (str): Optional. URL of an image where it is hosted. The image is used as the icon of the page
+        pg_icon (str): Optional. URL of an image where it is hosted. The image
+            is used as the icon of the page
 
     Returns: 
         pg_template (dict): Template to be used to create a new page in the database
@@ -166,9 +168,9 @@ def create_db_pg_template(db_id, pg_icon=None):
             pg_template['properties'][prop_name] = {prop_type:{'id': None}}
         elif prop_type == 'relation': 
             pg_template['properties'][prop_name] = {prop_type:[{'id': None}]}
-        elif prop_type == 'title': 
+        elif prop_type == 'title' or prop_type == 'rich_text': 
             pg_template['properties'][prop_name] = {prop_type:[{'text': {'content': None}}]}
-        else: # number and rich_text properties do not need special format 
+        else: # number properties do not need special format 
             pg_template['properties'][prop_name] = {prop_type:None}
 
     return pg_template 
@@ -176,10 +178,11 @@ def create_db_pg_template(db_id, pg_icon=None):
 
 def get_page_props(pg_id, prop=None): 
     """
-    Get the properties of a Notion page 
+    Get the properties (names, type, and current value) of a Notion page
 
     Args: 
-        pg_id (str): Notion page ID. Example: '522fccf3-f806-44a7-9560-1d094bebbe33'. Must have dash notation 
+        pg_id (str): Notion page ID. Must have dash notation 
+            Example: '522fccf3-f806-44a7-9560-1d094bebbe33'
         prop (str): Optional. Name of the property of the page to filter for
 
     Returns: 
@@ -192,3 +195,94 @@ def get_page_props(pg_id, prop=None):
         return pg_props 
     else: 
         return pg_props[prop]
+
+
+def create_db_pg(create_data): 
+    """
+    Create a new page in a Notion database 
+
+    Args: 
+        create_data (dict): Required data to populate the new page. Keys are 
+            database ID that the new page will be created in, icon (optional),
+            and the properties of that page. Should be created from 
+            create_db_pg_template() with values filled in
+    
+    Returns: 
+        status, pg_id (tuple): status indicates whether page was successfully 
+            created or errored. If successful, pg_id is the ID of the newly created page
+    """
+    create_json = json.dumps(create_data) 
+    response = requests.post(page_base_url, headers=notion_header, data=create_json)
+    response = json.loads(response.text)
+    
+    if response['object'] == 'error': 
+        print('page failed to create because: {}'.format(response['message']))
+        status = 'error'
+        pg_id = None
+    elif response['object'] == 'page': 
+        status = 'success'
+        pg_id = response['id']
+        print('page successfully created with page id: {}'.format(pg_id))
+    
+    return status, pg_id 
+
+
+def update_db_pg(pg_id, update_dict): 
+    """
+    Update the properties of an existing page in a Notion database 
+
+    Args: 
+        pg_id (str): Notion page ID. Must have dash notation 
+            Example: '522fccf3-f806-44a7-9560-1d094bebbe33'
+        update_dict (dict): Dictionary of properties to be updated in the page
+            Keys should be property name, values should be the new value to update 
+            Example: {'Stock name':'Apple'} 
+
+    Returns: 
+        update_status, update_pg_id (tuple): status indicates whether page was 
+            succesfully updated or errored. If successful, update_pg_id is the 
+            ID of the updated page, which should be the same as pg_id 
+        
+    """
+    pg_url = page_base_url + '/' + pg_id 
+
+    # get parent db id 
+    response = requests.get(pg_url, headers=notion_header)
+    pg_db_id = json.loads(response.text)['parent']['database_id']
+
+    # get parent db schema 
+    db_schema = get_db_schema(db_id=pg_db_id, simple=True)
+    
+    # format json data 
+    update_data = {'properties':{}}
+
+    for prop_name, prop_value in update_dict.items(): 
+        prop_type = db_schema[prop_name]
+        
+        if prop_type == 'date': 
+            update_data['properties'][prop_name] = {prop_type:{'start': prop_value, 'end': None}}
+        elif prop_type == 'select': 
+            update_data['properties'][prop_name] = {prop_type:{'id': prop_value}}
+        elif prop_type == 'relation': 
+            update_data['properties'][prop_name] = {prop_type:[{'id': prop_value}]}
+        elif prop_type == 'title' or prop_type == 'rich_text': 
+            update_data['properties'][prop_name] = {prop_type:[{'text': {'content': prop_value}}]}
+        else: # number properties do not need special format 
+            update_data['properties'][prop_name] = {prop_type:prop_value}
+
+    # update the page 
+    update_json = json.dumps(update_data)
+    update_response = requests.patch(pg_url, headers=notion_header, data=update_json)
+    update_response = json.loads(update_response.text)
+
+    if update_response['object'] == 'error': 
+        print('page failed to update because: {}'.format(update_response['message']))
+        update_status = 'error'
+        update_pg_id = None
+    elif update_response['object'] == 'page': 
+        update_status = 'success'
+        update_pg_id = update_response['id']
+        print('successfully updated: {}'.format(update_pg_id))
+
+    return update_status, update_pg_id 
+
