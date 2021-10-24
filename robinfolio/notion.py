@@ -5,21 +5,28 @@ from dotenv import load_dotenv
 import pandas as pd
 
 
-# get notion api credentials 
-load_dotenv()
+# SET UP NOTION API 
 NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
-NOTION_DATABASE_ID = os.environ.get('NOTION_DATABASE_ID')
 
+# databases 
+summary_db_id = os.environ.get('NOTION_SUMMARY_DB')
+orders_db_id = os.environ.get('NOTION_ORDERS_DB')
+lots_db_id = os.environ.get('NOTION_LOTS_DB')
 
-# notion urls 
-db_base_url = 'https://api.notion.com/v1/databases'
-page_base_url = 'https://api.notion.com/v1/pages'
+# page icons 
+orders_db_icon = os.environ.get('ORDERS_DB_ICON')
+summary_db_icon = os.environ.get('SUMMARY_DB_ICON')
+lots_db_icon = os.environ.get('LOTS_DB_ICON')
 
 notion_header = {
     'Authorization':NOTION_TOKEN, 
     'Notion-Version':'2021-08-16', # latest version as of 2021-10-18
     'Content-Type':'application/json'
 }
+
+# notion api urls 
+db_base_url = 'https://api.notion.com/v1/databases'
+page_base_url = 'https://api.notion.com/v1/pages'
 
 
 def get_db_schema(db_id, simple=False): 
