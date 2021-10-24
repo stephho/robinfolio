@@ -2,6 +2,7 @@ import os
 import json
 import requests
 from dotenv import load_dotenv
+import pandas as pd
 
 
 # get notion api credentials 
@@ -286,3 +287,153 @@ def update_db_pg(pg_id, update_dict):
 
     return update_status, update_pg_id 
 
+
+# below functions are specific to stocks 
+
+def define_sell_lots(stock_pg_id, total_shares_sold): 
+    """
+    Given a number of shares sold in one sell order, define the individual sell
+    lots to take the sold shares from buy orders on a first in first out basis (FIFO)
+
+    Args: 
+        stock_pg_id (str): Notion page ID of the stock sold 
+        total_shares_sold (float): The number of shares sold in one sell order. It is
+            possible for fractions of a share to be sold 
+
+    Returns: 
+        sell_lots (list): A list of dictionaries, where each dictionary is a sell
+            lot. Keys are page IDs of the buy order the shares are being sold from, 
+            values indicate how many shares sold from the buy order and how many 
+            shares left in the buy order
+            Example: [{'buy_pg_id': '9c165274-a9a8-4ef7-80c8-07035d84bc49',
+                       'shares_left': 0.0,
+                       'shares_sold': 10.0}]
+    """
+
+    # query orders db for all buy orders of the stock with unsold shares left 
+    filters_dict = {
+        'and': [
+            {
+                'property': 'Stock', 
+                'relation': {'contains':stock_pg_id}
+            }, 
+            {
+                'property': 'Type', 
+                'select': {'equals':'BUY'}
+            }, 
+            {
+                'property': 'Current shares', 
+                'formula': {'number':{'greater_than':0}}
+            }
+        ]
+    }
+    buy_pages = get_db_pages(db_id=orders_db_id, filters=filters_dict)
+    
+    # simplify the pages' property dictionaries to read into pandas df 
+    buy_orders = []
+    for pg in buy_pages: 
+        pg_dict = {}
+        pg_id = pg['id']
+        pg_dict['id'] = pg_id 
+        pg_dict['Stock'] = pg['properties']['Stock']['relation'][0]['id']
+        pg_dict['Type'] = pg['properties']['Type']['select']['name']
+        pg_dict['Order date'] = pg['properties']['Order date']['date']['start']
+        pg_dict['Created'] = pg['properties']['Created']['created_time']
+        pg_dict['Current shares'] = pg['properties']['Current shares']['formula']['number']
+        pg_dict['Cost basis'] = pg['properties']['Cost basis (BUY)']['formula']['number']
+        buy_orders.append(pg_dict)
+    
+    # read into pandas df 
+    buy_orders_df = pd.DataFrame.from_dict(buy_orders)
+    buy_orders_df.sort_values(by=['Order date', 'Created'], inplace=True)
+    buy_orders_df.reset_index(inplace=True, drop=True)
+    print('buy orders before updating with new shares sold:')
+    print(buy_orders_df.head())
+
+    # subtract sold shares from current shares starting with the oldest buy order (FIFO = first in first out)
+    buy_pg_ids = []
+
+    n = 0 # first row 
+    buy_pg_ids.append(buy_orders_df.iloc[n]['id'])
+    shares_left = buy_orders_df.iloc[n]['Current shares'] - total_shares_sold 
+
+    if shares_left < 0: 
+        buy_orders_df.at[n, 'shares_left'] = 0 # update to value of 0 
+        total_shares_left = abs(shares_left) # how many sold shares left over 
+        print('sold shares remaining, to be allocated: {}'.format(total_shares_left)) 
+
+        while total_shares_left > 0: 
+            n = n+1 # move to the next row 
+            buy_pg_ids.append(buy_orders_df.iloc[n]['id'])
+            shares_left = buy_orders_df.iloc[n]['Current shares'] - total_shares_left 
+            if shares_left < 0: 
+                buy_orders_df.at[n, 'shares_left'] = 0 # update to value of 0 
+                total_shares_left = abs(shares_left) # how many shares left over 
+                print('sold shares remaining, to be allocated: {}'.format(total_shares_left)) 
+            else: 
+                buy_orders_df.at[n, 'shares_left'] = shares_left 
+                total_shares_left = 0
+    else: 
+        buy_orders_df.at[n, 'shares_left'] = shares_left 
+
+    buy_orders_df['shares_sold'] = buy_orders_df['Current shares'] - buy_orders_df['shares_left']
+
+    sell_lots = []
+    for pg_id in buy_pg_ids: 
+        lot_dict = {}
+        lot_dict['buy_pg_id'] = pg_id 
+        lot_dict['shares_left'] = buy_orders_df[buy_orders_df['id'] == pg_id]['shares_left'].values[0]
+        lot_dict['shares_sold'] = buy_orders_df[buy_orders_df['id'] == pg_id]['shares_sold'].values[0]
+        sell_lots.append(lot_dict)
+
+    print('buy orders after updating with new shares sold:')
+    print(buy_orders_df.head())
+
+    return sell_lots 
+
+
+def calc_avg_unit_cost(stock_pg_id): 
+    """
+    Calculate the current average unit cost of a stock 
+    Average unit cost is used to calculate cost basis when shares are sold 
+    Average unit cost = total cost basis / number of shares currently owned
+
+    Args: 
+        stock_pg_id (str): Notion page ID of the stock 
+    
+    Returns: 
+        avg_unit_cost (float): Average unit cost rounded to 4 decimal places 
+    """
+    # query orders db for all buy orders of the stock with unsold shares left 
+    filters_dict = {
+        'and': [
+            {
+                'property': 'Stock', 
+                'relation': {'contains':stock_pg_id}
+            }
+        ]
+    }
+    all_pages = get_db_pages(db_id=orders_db_id, filters=filters_dict)
+    
+    # simplify the pages' property dictionaries to read into pandas df 
+    all_orders = []
+    for pg in all_pages: 
+        pg_dict = {}
+        pg_id = pg['id']
+        pg_dict['id'] = pg_id 
+        pg_dict['Stock'] = pg['properties']['Stock']['relation'][0]['id']
+        pg_dict['Type'] = pg['properties']['Type']['select']['name']
+        pg_dict['Order date'] = pg['properties']['Order date']['date']['start']
+        pg_dict['Created'] = pg['properties']['Created']['created_time']
+        pg_dict['Current shares'] = pg['properties']['Current shares']['formula']['number']
+        pg_dict['Cost basis'] = pg['properties']['Cost basis (BUY)']['formula']['number']
+        all_orders.append(pg_dict)
+    
+    # read into pandas df 
+    orders_df = pd.DataFrame.from_dict(all_orders)
+
+    # calculate average unit cost 
+    avg_unit_cost = orders_df['Cost basis'].sum() / orders_df['Current shares'].sum()
+    avg_unit_cost = round(avg_unit_cost, 4)
+
+    return avg_unit_cost
