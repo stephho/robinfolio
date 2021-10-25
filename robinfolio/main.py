@@ -31,6 +31,7 @@ rh_stocks_url = 'https://api.robinhood.com/instruments/'
 
 
 # SET UP NOTION API 
+
 NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
 
 # databases 
@@ -57,41 +58,42 @@ page_base_url = 'https://api.notion.com/v1/pages'
 # GET ORDERS FROM ROBINHOOD 
 
 order_history = get_order_history(stock_ticker=ticker_symbol)
+order_history_df = pd.DataFrame.from_dict(order_history)
 
-cleaned_orders = {}
-for r in order_history:
-    order_id = r['id']
-    order_date = r['last_transaction_at'][:10] # this is in GMT timezone. convert to EST timezone? 
-    order_date_fmt = order_date.replace('-', '/') 
-    order_type = r['side'].upper() # buy or sell
-    price = round(float(r['average_price']), 4)
-    fees = round(float(r['fees']), 4)
-    quantity = r['cumulative_quantity']
+# read cleaned order history data into pandas 
+cols = ['id', 'instrument_id', 'last_transaction_at', 'side', 'cumulative_quantity', 'average_price', 'fees']
+cleaned_orders_df = order_history_df[cols]
+cleaned_orders_df.set_index('id', inplace=True)
+cleaned_orders_df.rename(columns={'side':'order_type',
+    'cumulative_quantity':'shares', 
+    'average_price':'unit_cost', 
+    'last_transaction_at':'order_date'}, inplace=True)
 
-    if quantity.split('.')[1][:2] == '00': # 2 decimal places 
-        quantity = int(quantity.split('.')[0]) 
-    else: 
-        quantity = round(float(quantity), 4)
+# get order date in est timezone 
+cleaned_orders_df['order_date_utc'] = pd.to_datetime(cleaned_orders_df['order_date'], utc=True, infer_datetime_format=True)
+cleaned_orders_df['order_date_est'] = cleaned_orders_df['order_date_utc'].dt.tz_convert('America/New_York')
+cleaned_orders_df['order_date_display'] = cleaned_orders_df['order_date_est'].dt.strftime('%Y/%m/%d')
+cleaned_orders_df['order_date_est'] = cleaned_orders_df['order_date_est'].dt.strftime('%Y-%m-%dT%H:%M:%S%z') #2021-10-15T12:00:00-07:00
 
-    order_name = '{} {} {} {} @ ${:.4f}'.format(order_date_fmt, ticker_symbol, order_type, quantity, price)
-    print(order_name)
-    
-    order_dict = {} 
-    order_dict['Order'] = order_name 
-    order_dict['Order date'] = order_date 
-    order_dict['Type'] = order_type 
-    order_dict['Unit cost'] = price
-    order_dict['Fee'] = fees 
-    order_dict['Shares'] = quantity 
-    order_dict['Stock'] = ticker_symbol
-    
-    cleaned_orders[order_id] = order_dict
+cleaned_orders_df['price_dollars'] = cleaned_orders_df['unit_cost'].str.split('.').str[0]
+cleaned_orders_df['price_cents'] = cleaned_orders_df['unit_cost'].str.split('.').str[1]
+cleaned_orders_df['price_display'] = cleaned_orders_df['price_dollars'] + '.' + cleaned_orders_df['price_cents'].str[:4]
 
-history_df = pd.DataFrame.from_dict(cleaned_orders, orient='index')
-history_df.sort_values('Order date', inplace=True)
-print(history_df)
+cleaned_orders_df['shares_int'] = cleaned_orders_df['shares'].str.split('.').str[0]
+cleaned_orders_df['shares_partial'] = cleaned_orders_df['shares'].str.split('.').str[1]
+cleaned_orders_df['shares_display'] = cleaned_orders_df['shares_int']
+cleaned_orders_df.loc[(cleaned_orders_df['shares_partial'] != '00000000'), 'shares_display'] = cleaned_orders_df['shares_int'] + '.' + cleaned_orders_df['shares_partial'].str[:4]
 
-sorted_orders = history_df.to_dict(orient='index')
+cleaned_orders_df['ticker_symbol'] = ticker_symbol 
+cleaned_orders_df['separator'] = '@ $'
+cleaned_orders_df['order_type'] = cleaned_orders_df['order_type'].str.upper()
+cleaned_orders_df['order_name'] = cleaned_orders_df['order_date_display'].str.cat(cleaned_orders_df[['ticker_symbol', 'order_type', 'shares_display', 'separator']], sep=' ')
+cleaned_orders_df['order_name'] = cleaned_orders_df['order_name'].str.cat(cleaned_orders_df['price_display'])
+cleaned_orders_df.drop(columns=['separator'], inplace=True)
+
+# important for determining sell lots that orders are in ascending order by timestamp
+cleaned_orders_df.sort_values('order_date', inplace=True)
+sorted_orders = cleaned_orders_df.to_dict(orient='index')
 
 
 # PREPARE NOTION 
@@ -99,7 +101,8 @@ sorted_orders = history_df.to_dict(orient='index')
 # get page id for each stock 
 stocks_pg_ids = get_db_pg_ids(summary_db_id)
 
-# create page templates 
+# create json data templates to create pages in databases
+summary_template = create_db_pg_template(db_id=summary_db_id, pg_icon=summary_db_icon)
 lots_template = create_db_pg_template(db_id=lots_db_id, pg_icon=lots_db_icon)
 order_template = create_db_pg_template(orders_db_id, pg_icon=orders_db_icon)
 
@@ -108,23 +111,24 @@ order_template = create_db_pg_template(orders_db_id, pg_icon=orders_db_icon)
 # and corresponding pages in notion sell lots database 
 # version with avg unit cost calculated from pandas 
 
-for r in sorted_orders: 
+for o in sorted_orders: 
     order_data = deepcopy(order_template)
 
-    order_name = sorted_orders[r]['Order']
-    shares = sorted_orders[r]['Shares']
+    order_name = sorted_orders[o]['order_name']
+    shares = float(sorted_orders[o]['shares']) 
 
     order_data['properties']['Order']['title'][0]['text']['content'] = order_name
-    order_data['properties']['Order date']['date']['start'] = sorted_orders[r]['Order date']
+    order_data['properties']['Order date']['date']['start'] = sorted_orders[o]['order_date_est']
     order_data['properties']['Shares']['number'] = shares 
-    order_data['properties']['Unit cost']['number'] = sorted_orders[r]['Unit cost']
+    order_data['properties']['Unit cost']['number'] = float(sorted_orders[o]['unit_cost']) 
 
     # get the stock's page id in the summary db 
-    ticker_symbol = sorted_orders[r]['Stock']
+    ticker_symbol = sorted_orders[o]['ticker_symbol']
     stock_pg_id = stocks_pg_ids[ticker_symbol]
     order_data['properties']['Stock']['relation'][0]['id'] = stock_pg_id 
 
-    if sorted_orders[r]['Type'] == 'BUY': 
+    if sorted_orders[o]['order_type'] == 'BUY': 
+
         for p in ['Later sold in', 'Avg unit cost', 'Fee', 'Sell lots']:
             # these properties are only for sell  
             order_data['properties'].pop(p)
@@ -137,7 +141,6 @@ for r in sorted_orders:
         if buy_status == 'success': 
             # get the new average cost after creating buy order, then update it in the buy order page just created 
             avg_cost = calc_avg_unit_cost(stock_pg_id)
-            print(avg_cost)
             update_avg_cost = {'Avg unit cost':avg_cost}
 
             update_status, update_pg_id = update_db_pg(pg_id=buy_pg_id, update_dict=update_avg_cost)
@@ -150,11 +153,10 @@ for r in sorted_orders:
             order_data['properties'].pop(p) 
         
         order_data['properties']['Type']['select']['id'] = '407f704b-a0a2-47cd-94ae-59aaa1e93e22' # SELL 
-        order_data['properties']['Fee']['number'] = sorted_orders[r]['Fee']
+        order_data['properties']['Fee']['number'] = float(sorted_orders[o]['fees'])
         
         # get the current average cost in order to calculate cost basis 
-        avg_cost = calc_avg_unit_cost(stock_pg_id)
-        print(avg_cost)
+        avg_cost = calc_avg_unit_cost(stock_pg_id) 
         order_data['properties']['Avg unit cost']['number'] = avg_cost 
 
         # create sell order page 
@@ -185,4 +187,4 @@ for r in sorted_orders:
                 n = n+1 
                 print('\n')
 
-print('done!')
+print('done inputting orders for {} stock into notion!'.format(ticker_symbol))
