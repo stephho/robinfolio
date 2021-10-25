@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 import pandas as pd
 from copy import deepcopy
-from robinhood import get_order_history
+from robinhood import get_order_history, get_instrument_id
 from notion import get_db_pg_ids, create_db_pg_template, create_db_pg, update_db_pg, calc_avg_unit_cost, define_sell_lots
 import os 
 
@@ -105,6 +105,23 @@ stocks_pg_ids = get_db_pg_ids(summary_db_id)
 summary_template = create_db_pg_template(db_id=summary_db_id, pg_icon=summary_db_icon)
 lots_template = create_db_pg_template(db_id=lots_db_id, pg_icon=lots_db_icon)
 order_template = create_db_pg_template(orders_db_id, pg_icon=orders_db_icon)
+
+try: 
+    stock_pg_id = stocks_pg_ids[ticker_symbol]
+except KeyError: 
+    print('stock does not exist in summary db, must create a page for it')
+
+    # get stockname from robinhood
+    instr_id, stock_name = get_instrument_id(ticker_symbol)
+
+    stock_data = deepcopy(summary_template)
+    stock_data['properties']['Stock ticker']['title'][0]['text']['content'] = ticker_symbol
+    stock_data['properties']['Stock name']['rich_text'][0]['text']['content'] = stock_name 
+    stock_data['properties'].pop('Stock orders') # this relation will be filled out in the orders db 
+
+    stock_status, stock_pg_id = create_db_pg(create_data=stock_data)
+    
+    stocks_pg_ids[ticker_symbol] = stock_pg_id
 
 
 # CREATE PAGES FOR EACH ROBINHOOD ORDER IN NOTION ORDERS DATABASE 
