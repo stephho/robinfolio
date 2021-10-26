@@ -6,6 +6,8 @@ import pandas as pd
 
 
 # SET UP NOTION API 
+
+load_dotenv()
 NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
 
 # databases 
@@ -89,7 +91,8 @@ def get_db_pages(db_id, filters=None):
         }
 
     Returns: 
-        pages (list): List of pages in the Notion database. May be empty if error or no pages match filter
+        all_pages (list): List of pages in the Notion database. May be empty if
+            error or if no pages match filter 
     """
     db_query_url = db_base_url + '/' + db_id + '/query'
 
@@ -98,15 +101,31 @@ def get_db_pages(db_id, filters=None):
         filters_data = json.dumps(filters_data)
     else: 
         filters_data = None
+    
+    all_pages = []
 
     response = requests.post(db_query_url, headers=notion_header, data=filters_data)
     response = json.loads(response.text)
+
     if response['object'] == 'error': 
         print('there is an error: {}'.format(response['message']))
-        pages = []
     else: 
-        pages = response['results']
-    return pages
+        all_pages = all_pages + response['results']
+        next_page = response['has_more']
+
+        while next_page: 
+            next_page_data = {'start_cursor':response['next_cursor']} 
+            next_page_data = json.dumps(next_page_data)
+            response = requests.post(db_query_url, headers=notion_header, data=next_page_data)
+            response = json.loads(response.text)
+
+            if response['object'] == 'error': 
+                print('there is an error: {}'.format(response['message']))
+            else: 
+                all_pages = all_pages + response['results']
+                next_page = response['has_more']
+    
+    return all_pages
 
 
 def get_db_pg_ids(db_id): 
@@ -186,7 +205,7 @@ def create_db_pg_template(db_id, pg_icon=None):
 
 def get_page_props(pg_id, prop=None): 
     """
-    Get the properties (names, type, and current value) of a Notion page
+    Get the properties (names, types, and current values) of a Notion page
 
     Args: 
         pg_id (str): Notion page ID. Must have dash notation 
@@ -194,7 +213,8 @@ def get_page_props(pg_id, prop=None):
         prop (str): Optional. Name of the property of the page to filter for
 
     Returns: 
-        (dict): Keys are the property names. Values are the property types and the current value of the property 
+        (dict): Keys are the property names. Values are the property types and 
+            the current value of the property 
     """
     pg_url = page_base_url + '/' + pg_id 
     response = requests.get(pg_url, headers=notion_header)
