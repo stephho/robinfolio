@@ -203,26 +203,113 @@ def create_db_pg_template(db_id, pg_icon=None):
     return pg_template 
     
 
-def get_page_props(pg_id, prop=None): 
+def get_page_prop(pg_id, prop_id): 
     """
-    Get the properties (names, types, and current values) of a Notion page
+    Get the the current value of a property of a Notion page
 
     Args: 
         pg_id (str): Notion page ID. Must have dash notation 
             Example: '522fccf3-f806-44a7-9560-1d094bebbe33'
-        prop (str): Optional. Name of the property of the page to filter for
+        prop_id (str): Notion property ID. Example: 'D%7CTE' 
 
     Returns: 
-        (dict): Keys are the property names. Values are the property types and 
-            the current value of the property 
+        prop_value: The current value of the property. Can be null 
+            
+            The data type of prop_value depends on the property type: 
+            number === int, float 
+            relation, multi_select, people, files === list 
+            date === string if only start date, list if start and end dates 
+            checkbox === bool 
+            formula === int, float, str, bool (depends on the formula)
+            title, rich_text, select, created_by, last_edited_by, created_time, 
+                last_edited_time, url, email === str 
+
+            A note on the rollup property type: 
+            A rollup has two parts: relations and an aggregation (calculation) based 
+            on the relations. prop_value will return the value of the aggregation, 
+            not the list of relations. Thus the data type of prop_value depends 
+            on the calculation, which is a formula type 
     """
-    pg_url = page_base_url + '/' + pg_id 
-    response = requests.get(pg_url, headers=notion_header)
-    pg_props = json.loads(response.text)['properties']
-    if prop == None: 
-        return pg_props 
-    else: 
-        return pg_props[prop]
+    prop_url = page_base_url + '/' + pg_id + '/properties/' + prop_id 
+    response = requests.get(prop_url, headers=notion_header)
+    response = json.loads(response.text)
+
+    if response['object'] == 'error': 
+        print(response['message'])
+        prop_value = None 
+
+    elif response['object'] == 'list': 
+        # the following property types return a paginated list of results: 
+        # title, rich_text, relation, people, rollup 
+
+        # rollup is a special case: we want the aggregation (rollup value), not the relations in the list of results 
+        try: 
+            prop_subtype = response['rollup']['type']
+            prop_type = 'rollup'
+        except KeyError: 
+            results = response['results']
+            prop_type = results[0]['type'] # all items in the results list should be of the same property type  
+        
+        if prop_type == 'rollup': 
+            next_page = response['has_more']
+            while next_page: 
+                next_page_url = page_base_url + '/' + pg_id + '/properties/' + prop_id + '?start_cursor=' + response['next_cursor'] 
+                response = requests.get(next_page_url, headers=notion_header)
+                response = json.loads(response.text)
+                if response['object'] == 'error': 
+                    print('there is an error: {}'.format(response['message']))
+                else: 
+                    next_page = response['has_more']
+            
+            # when there are no more pages, the value of the aggregation is up-to-date
+            prop_value = response['rollup'][prop_subtype]
+
+        elif prop_type in ['title', 'rich_text']: 
+            prop_value = results[0][prop_type]['plain_text']
+
+        elif prop_type in ['relation', 'people']: 
+            # return a list of all the items in the relation or people list 
+            prop_subtype = 'id' if prop_type == 'relation' else 'name'
+            prop_value = []
+            for r in results: 
+                item = r[prop_type][prop_subtype]
+                prop_value.append(item)
+            
+            next_page = response['has_more']
+            while next_page: 
+                next_page_url = page_base_url + '/' + pg_id + '/properties/' + prop_id + '?start_cursor=' + response['next_cursor'] 
+                response = requests.get(next_page_url, headers=notion_header)
+                response = json.loads(response.text)
+                if response['object'] == 'error': 
+                    print('there is an error: {}'.format(response['message']))
+                else: 
+                    for r in response['results']: 
+                        item = r[prop_type][prop_subtype]
+                        prop_value.append(item)
+                    next_page = response['has_more']
+
+    elif response['object'] == 'property_item':
+        prop_type = response['type']
+        if prop_type == 'formula': 
+            prop_subtype = response[prop_type]['type']
+            prop_value = response[prop_type][prop_subtype]
+        elif prop_type == 'created_by':
+            # can be user or bot 
+            prop_value = response[prop_type]['id'] # user id, no name available 
+        elif prop_type in ['last_edited_by', 'select']: 
+            prop_value = response[prop_type]['name']
+        elif prop_type in ['multi_select', 'files']: 
+            # return a list of the names of the values in the multi select 
+            prop_value = [x['name'] for x in response[prop_type]]
+        elif prop_type == 'date': 
+            start_date = response[prop_type]['start']
+            end_date = response[prop_type]['end']
+            prop_value = [start_date, end_date] if end_date else start_date 
+        else: 
+            # number, created_time, last_edited_time, checkbox, url, email are simple properties
+            prop_value = response[prop_type]
+
+    return prop_value
 
 
 def create_db_pg(create_data): 
