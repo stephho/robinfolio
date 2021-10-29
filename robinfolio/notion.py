@@ -62,6 +62,46 @@ def get_db_schema(db_id, simple=False):
     return db_schema
 
 
+def get_prop_id(db_id, prop_name=None): 
+    """
+    Get the ID of a property in a Notion database. Property IDs are needed for
+    other functions, such as get_prop_value()
+
+    Notion property IDs are short strings comprised of letters and symbols. 
+    Example: '%3FQz%7D'. A special case is the title property, which is the name
+    of the pages in the database. Every database requires one title property and
+    its ID is always 'title'. 
+
+    Args: 
+        db_id (str): Notion database ID 
+        prop_name (str): Optional. Filter the property IDs of a database for 
+            one property, by its name. Case sensitive because Notion properties
+            are also case-sensitive, i.e. 'Current shares' and 'current shares'
+            can be two different properties in the same database 
+        
+    Returns: 
+        prop_ids (dict): A dictionary containing all of the properties in the 
+            database, where the keys are the property names and the values are 
+            the property IDs 
+        prop_id (str): A single Notion property ID. If prop_name argument is
+            passed, prop_id is returned instead of the prop_ids dictionary 
+    """
+    db_schema = get_db_schema(db_id=db_id)
+
+    if prop_name: 
+        try: 
+            prop_id = db_schema[prop_name]['id']
+        except KeyError: 
+            print('There is no property in database ID {} called: {}'.format(db_id, prop_name))
+            prop_id = None
+        return prop_id 
+    else: 
+        prop_ids = {}
+        for prop_name in db_schema: 
+            prop_ids[prop_name] = db_schema[prop_name]['id']
+        return prop_ids 
+
+
 def get_db_pages(db_id, filters=None): 
     """
     Get a list of pages (and the properties of each page) in a Notion database 
@@ -208,7 +248,7 @@ def get_page_prop(pg_id, prop_id):
     Get the the current value of a property of a Notion page
 
     Args: 
-        pg_id (str): Notion page ID. Must have dash notation 
+        pg_id (str): N,otion page ID. Must have dash notation 
             Example: '522fccf3-f806-44a7-9560-1d094bebbe33'
         prop_id (str): Notion property ID. Example: 'D%7CTE' 
 
