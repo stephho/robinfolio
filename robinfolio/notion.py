@@ -45,20 +45,26 @@ def get_db_schema(db_id, simple=False):
     """
     db_url = db_base_url + '/' + db_id 
     response = requests.get(db_url, headers=notion_header)
-    db_schema_full = json.loads(response.text)['properties']
-    
-    if simple: 
-        db_schema = {}
-        for prop_name, prop_info in db_schema_full.items(): 
-            prop_type = prop_info['type']
-            if prop_type in ['formula', 'rollup', 'created_time', 'created_by', 'last_edited_time', 'last_edited_by']: 
-                # these property types are automatically populated
-                pass 
-            else: 
-                db_schema[prop_name] = prop_type
-    else: 
-        db_schema = db_schema_full 
+    response = json.loads(response.text)
 
+    if response['object'] == 'error': 
+        print('failed to get database schema: {}'.format(response['message'])) 
+        db_schema = None 
+    else: 
+        db_schema_full = response['properties']
+
+        if simple: 
+            db_schema = {}
+            for prop_name, prop_info in db_schema_full.items(): 
+                prop_type = prop_info['type']
+                if prop_type in ['formula', 'rollup', 'created_time', 'created_by', 'last_edited_time', 'last_edited_by']: 
+                    # these property types are automatically populated
+                    pass 
+                else: 
+                    db_schema[prop_name] = prop_type
+        else: 
+            db_schema = db_schema_full 
+    
     return db_schema
 
 
@@ -148,7 +154,7 @@ def get_db_pages(db_id, filters=None):
     response = json.loads(response.text)
 
     if response['object'] == 'error': 
-        print('there is an error: {}'.format(response['message']))
+        print('failed to get database pages: {}'.format(response['message']))
     else: 
         all_pages = all_pages + response['results']
         next_page = response['has_more']
@@ -160,7 +166,7 @@ def get_db_pages(db_id, filters=None):
             response = json.loads(response.text)
 
             if response['object'] == 'error': 
-                print('there is an error: {}'.format(response['message']))
+                print('failed to get database pages: {}'.format(response['message']))
             else: 
                 all_pages = all_pages + response['results']
                 next_page = response['has_more']
@@ -243,7 +249,7 @@ def create_db_pg_template(db_id, pg_icon=None):
     return pg_template 
     
 
-def get_page_prop(pg_id, prop_id): 
+def get_prop_value(pg_id, prop_id): 
     """
     Get the the current value of a property of a Notion page
 
@@ -275,7 +281,7 @@ def get_page_prop(pg_id, prop_id):
     response = json.loads(response.text)
 
     if response['object'] == 'error': 
-        print(response['message'])
+        print('failed to get value of property ID {}: {}'.format(prop_id, response['message']))
         prop_value = None 
 
     elif response['object'] == 'list': 
@@ -297,7 +303,7 @@ def get_page_prop(pg_id, prop_id):
                 response = requests.get(next_page_url, headers=notion_header)
                 response = json.loads(response.text)
                 if response['object'] == 'error': 
-                    print('there is an error: {}'.format(response['message']))
+                    print('failed to get value of property ID {}: {}'.format(prop_id, response['message']))
                 else: 
                     next_page = response['has_more']
             
@@ -321,7 +327,7 @@ def get_page_prop(pg_id, prop_id):
                 response = requests.get(next_page_url, headers=notion_header)
                 response = json.loads(response.text)
                 if response['object'] == 'error': 
-                    print('there is an error: {}'.format(response['message']))
+                    print('failed to get value of property ID {}: {}'.format(prop_id, response['message']))
                 else: 
                     for r in response['results']: 
                         item = r[prop_type][prop_subtype]
@@ -371,7 +377,7 @@ def create_db_pg(create_data):
     response = json.loads(response.text)
     
     if response['object'] == 'error': 
-        print('page failed to create because: {}'.format(response['message']))
+        print('failed to create page: {}'.format(response['message']))
         status = 'error'
         pg_id = None
     elif response['object'] == 'page': 
@@ -431,7 +437,7 @@ def update_db_pg(pg_id, update_dict):
     update_response = json.loads(update_response.text)
 
     if update_response['object'] == 'error': 
-        print('page failed to update because: {}'.format(update_response['message']))
+        print('failed to update page: {}'.format(update_response['message']))
         update_status = 'error'
         update_pg_id = None
     elif update_response['object'] == 'page': 
