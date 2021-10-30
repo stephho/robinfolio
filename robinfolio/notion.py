@@ -238,7 +238,7 @@ def create_db_pg_template(db_id, pg_icon=None):
         if prop_type == 'date': 
             pg_template['properties'][prop_name] = {prop_type:{'start': None, 'end': None}}
         elif prop_type == 'select': 
-            pg_template['properties'][prop_name] = {prop_type:{'id': None}}
+            pg_template['properties'][prop_name] = {prop_type:{'name': None}}
         elif prop_type == 'relation': 
             pg_template['properties'][prop_name] = {prop_type:[{'id': None}]}
         elif prop_type == 'title' or prop_type == 'rich_text': 

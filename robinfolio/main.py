@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 import pandas as pd
 from copy import deepcopy
 from robinhood import get_order_history, get_instrument_id
-from notion import get_db_pg_ids, create_db_pg_template, create_db_pg, update_db_pg, calc_avg_unit_cost, define_sell_lots
+from notion import get_db_pg_ids, create_db_pg_template, create_db_pg, update_db_pg, define_sell_lots, get_prop_id, get_prop_value
 import os 
 
 
@@ -106,6 +106,7 @@ summary_template = create_db_pg_template(db_id=summary_db_id, pg_icon=summary_db
 lots_template = create_db_pg_template(db_id=lots_db_id, pg_icon=lots_db_icon)
 order_template = create_db_pg_template(orders_db_id, pg_icon=orders_db_icon)
 
+# get page id of the stock, create one if it does not exist 
 try: 
     stock_pg_id = stocks_pg_ids[ticker_symbol]
 except KeyError: 
@@ -122,6 +123,10 @@ except KeyError:
     stock_status, stock_pg_id = create_db_pg(create_data=stock_data)
     
     stocks_pg_ids[ticker_symbol] = stock_pg_id
+
+# need average unit cost property id to get the value to populate in order pages
+avg_cost_prop = get_prop_id(db_id=summary_db_id, prop_name='Average unit cost')
+print('average unit cost property id in summary db: {}'.format(avg_cost_prop))
 
 
 # CREATE PAGES FOR EACH ROBINHOOD ORDER IN NOTION ORDERS DATABASE 
@@ -140,8 +145,8 @@ for o in sorted_orders:
     order_data['properties']['Unit cost']['number'] = float(sorted_orders[o]['unit_cost']) 
 
     # get the stock's page id in the summary db 
-    ticker_symbol = sorted_orders[o]['ticker_symbol']
-    stock_pg_id = stocks_pg_ids[ticker_symbol]
+    # ticker_symbol = sorted_orders[o]['ticker_symbol']
+    # stock_pg_id = stocks_pg_ids[ticker_symbol]
     order_data['properties']['Stock']['relation'][0]['id'] = stock_pg_id 
 
     if sorted_orders[o]['order_type'] == 'BUY': 
@@ -150,18 +155,20 @@ for o in sorted_orders:
             # these properties are only for sell  
             order_data['properties'].pop(p)
 
-        order_data['properties']['Type']['select']['id'] = '21b4e1ee-c961-4bef-8d48-0f55d73eb2b7' # BUY
+        order_data['properties']['Type']['select']['name'] = 'BUY' 
 
         print('creating the order page for: {}'.format(order_name)) 
         buy_status, buy_pg_id = create_db_pg(create_data=order_data)
 
         if buy_status == 'success': 
             # get the new average cost after creating buy order, then update it in the buy order page just created 
-            avg_cost = calc_avg_unit_cost(stock_pg_id)
+            avg_cost = get_prop_value(pg_id=stock_pg_id, prop_id=avg_cost_prop)
             update_avg_cost = {'Avg unit cost':avg_cost}
 
             update_status, update_pg_id = update_db_pg(pg_id=buy_pg_id, update_dict=update_avg_cost)
             print('\n')
+        elif buy_status == 'error': 
+            break 
     
     else: # SELL ORDER 
 
@@ -169,11 +176,12 @@ for o in sorted_orders:
         for p in ['Later sold in', 'Sell lots']: 
             order_data['properties'].pop(p) 
         
-        order_data['properties']['Type']['select']['id'] = '407f704b-a0a2-47cd-94ae-59aaa1e93e22' # SELL 
+        order_data['properties']['Type']['select']['name'] = 'SELL' 
         order_data['properties']['Fee']['number'] = float(sorted_orders[o]['fees'])
         
         # get the current average cost in order to calculate cost basis 
-        avg_cost = calc_avg_unit_cost(stock_pg_id) 
+        # avg_cost = calc_avg_unit_cost(stock_pg_id) 
+        avg_cost = get_prop_value(pg_id=stock_pg_id, prop_id=avg_cost_prop)
         order_data['properties']['Avg unit cost']['number'] = avg_cost 
 
         # create sell order page 
@@ -203,5 +211,8 @@ for o in sorted_orders:
                 
                 n = n+1 
                 print('\n')
+        
+        elif sell_status == 'error': 
+            break
 
 print('done inputting orders for {} stock into notion!'.format(ticker_symbol))
