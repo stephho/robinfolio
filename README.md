@@ -1,11 +1,11 @@
 # robinfolio
 
-> **robinfolio** aims to get information about your [Robinhood](https://robinhood.com/) portfolio and order history into [Notion.so](https://notion.so) databases, allowing easier and more granular tracking of your stocks, costs, and gains and losses
+> **robinfolio** is a Python project to get information about your [Robinhood](https://robinhood.com/) portfolio and order history into [Notion](https://notion.so), using the Robinhood and Notion APIs. This enables easier and more granular tracking of your stocks, costs, and gains and losses
 
 ## Background
-While Robinhood is good at giving you an overview of your portfolio, its reporting cabilities are limited in terms of displaying more detail about your order history — for example, calculating your gains and losses on individual orders. There's not even an easy way to export that data into Google Sheets or Excel, a popular method of generating portfolio reporting among amateur traders. I've chosen Notion because of their easy-to-use interface that allows filtering, sorting, different views of the same database, and a better note-taking experience. 
+While Robinhood can give you a great overview of your portfolio, its reporting cabilities are limited in terms of displaying more detail about your order history — for example, calculating your gains and losses on individual orders. There's also no easy way to export that data out of Robinhood so that you can put it into an external application to create your own reporting.
 
-robinfolio is a Python project which enables automating the process of getting information about your portfolio from your Robinhood account and into Notion, using the Robinhood and Notion APIs :rocket: 
+I started robinfolio as a personal project, born out of a need to reduce/eliminate manual data input and to help my mom manage her Robinhood portfolio better. Instead of a traditional spreadsheet, I've chosen Notion as the external application to export Robinhood data to because of their easy-to-use interface that allows filtering, sorting, different views of the same database, and a better note-taking experience. 
 
 ## Notion requirements 
 ### Creating the databases 
