@@ -13,7 +13,17 @@ class robinhood:
         api_token (str): Robinhood API token
         api_header (dict): HTTP headers required by Robinhood API 
         api_orders_url (str): Robinhood's API URL for interacting with order objects
-        api_stocks_url (str): Robinhood's API URL for interacting with stock objects, aka instruments
+        api_stocks_url (str): Robinhood's API URL for interacting with stock objects, 
+            aka instruments
+        orders (list): Robinhood account's order history, represented as a list 
+            of dictionaries, where each dictionary is an order and its associated
+            information
+        instrument_id (str): If orders are filtered for a particular stock, this
+            is the stock's Robinhood instrument ID, a unique alphanumeric identifier 
+        stock_ticker (str): If orders are filtered for a particular stock, the stock 
+            ticker symbol
+        stock_name (str): If orders are filtered for a particular stock, the stock 
+            name, i.e. company name
     """
 
     def __init__(self, api_token): 
@@ -103,17 +113,26 @@ class robinhood:
             used. If neither instrument_id nor stock_ticker is passed, filled 
             orders for all stocks will be returned 
 
-        Returns: 
-            all_orders (list): A list of dictionaries, where each dictionary is 
+        Attributes: 
+            orders (list): A list of dictionaries, where each dictionary is 
                 an order and its associated information 
         """
 
-        if instrument_id == None and stock_ticker != None: 
-            instr_id, stock_name = self.get_instrument_id(stock_ticker=stock_ticker) 
-            if instr_id == None: 
-                return None
+        if not instrument_id and stock_ticker: 
+            self.instrument_id, self.stock_name = self.get_instrument_id(stock_ticker=stock_ticker) 
+            self.stock_ticker = stock_ticker 
+        elif instrument_id and not stock_ticker: 
+            self.stock_ticker, self.stock_name = self.get_stock_name(instrument_id=instrument_id)
+            self.instrument_id = instrument_id 
+        elif instrument_id and stock_ticker: 
+            print('both instrument ID {} and stock ticker symbol {} were passed'.format(instrument_id, stock_ticker))
+            print('using instrument ID {} only...'.format(instrument_id))
+            self.stock_ticker, self.stock_name = self.get_stock_name(instrument_id=instrument_id)
+            self.instrument_id = instrument_id 
         else: 
-            instr_id = instrument_id 
+            self.instrument_id = None 
+            self.stock_ticker = None 
+            self.stock_name = None 
 
         all_orders = []
         response = requests.get(self.api_orders_url, headers=self.api_header)
@@ -123,10 +142,10 @@ class robinhood:
         for r in results: 
             # filter out cancelled or unfilled orders 
             if r['side'] in ['buy', 'sell'] and r['state'] == 'filled': 
-                if instr_id == None: 
+                if not self.instrument_id: 
                     all_orders.append(r) 
                 else: 
-                    if r['instrument_id'] == instr_id: 
+                    if r['instrument_id'] == self.instrument_id: 
                         all_orders.append(r)
         
         while next_page: 
@@ -137,10 +156,10 @@ class robinhood:
 
             for r in results: 
                 if r['side'] in ['buy', 'sell'] and r['state'] == 'filled':
-                    if instr_id == None: 
+                    if self.instrument_id == None: 
                         all_orders.append(r) 
                     else: 
-                        if r['instrument_id'] == instr_id: 
+                        if r['instrument_id'] == self.instrument_id: 
                             all_orders.append(r)
         
-        return all_orders 
+        self.orders = all_orders 
